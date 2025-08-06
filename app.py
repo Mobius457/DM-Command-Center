@@ -86,6 +86,18 @@ class DMCommandCenterApp(ctk.CTk):
     def __init__(self, rules_lawyer_chain, world_forge_llm):
         super().__init__()
 
+        # Inside the __init__ method...
+        self.tab_view.add("World Forge")
+        self.tab_view.add("AI Rules Lawyer")
+        self.tab_view.add("Encounter Architect")
+        self.tab_view.add("Ambiance Engine") # <-- ADD THIS LINE
+
+        # --- Configure Tabs ---
+        self.setup_world_forge_tab()
+        self.setup_rules_lawyer_tab()
+        self.setup_encounter_architect_tab()
+        self.setup_ambiance_tab() # <-- ADD THIS LINE
+
         # --- AI Model & Data Storage ---
         self.rules_lawyer_chain = rules_lawyer_chain
         self.world_forge_llm = world_forge_llm
@@ -103,11 +115,40 @@ class DMCommandCenterApp(ctk.CTk):
         self.tab_view.add("World Forge")
         self.tab_view.add("AI Rules Lawyer")
         self.tab_view.add("Encounter Architect")
+        self.tab_view.add("Ambiance Engine")
         
         # --- Configure Tabs ---
         self.setup_world_forge_tab()
         self.setup_rules_lawyer_tab()
         self.setup_encounter_architect_tab()
+        self.setup_ambiance_tab()
+
+    def setup_ambiance_tab(self):
+        """Creates the widgets for the Dynamic Ambiance Engine tab."""
+        tab = self.tab_view.tab("Ambiance Engine")
+
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(1, weight=1)
+
+        # Control Frame
+        control_frame = ctk.CTkFrame(tab)
+        control_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+
+        self.ambiance_button = ctk.CTkButton(control_frame, text="Start Listening")
+        self.ambiance_button.pack(side="left", padx=10, pady=10)
+
+        self.ambiance_status_label = ctk.CTkLabel(control_frame, text="Status: Idle")
+        self.ambiance_status_label.pack(side="left", padx=10, pady=10)
+
+        # Log Frame
+        log_frame = ctk.CTkFrame(tab)
+        log_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+
+        log_label = ctk.CTkLabel(log_frame, text="Transcription Log")
+        log_label.pack(padx=10, pady=(10,0))
+
+        self.transcription_log = ctk.CTkTextbox(log_frame, state="disabled")
+        self.transcription_log.pack(padx=10, pady=10, fill="both", expand=True)
         
     def load_monsters(self):
         """Loads monster data from the CSV file."""
