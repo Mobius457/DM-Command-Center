@@ -1,0 +1,10 @@
+customtkinter
+python-dotenv
+langchain
+langchain-openai
+langchain-community
+chromadb
+tiktoken
+pypdf
+sounddevice
+scipy
