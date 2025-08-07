@@ -174,6 +174,9 @@ class DMCommandCenterApp(ctk.CTk):
                 self.ambiance_button.configure(state=data)
             elif msg_type == 'button_text':
                 self.ambiance_button.configure(text=data)
+            elif msg_type == 'suggestion':
+                self.update_textbox(self.suggestion_output, data)
+                self.suggestion_button.configure(state="normal", text="Get AI Suggestions")
         except queue.Empty:
             pass
         finally:
@@ -602,8 +605,21 @@ class DMCommandCenterApp(ctk.CTk):
         calc_button = ctk.CTkButton(calc_frame, text="Calculate Difficulty", command=self.calculate_encounter)
         calc_button.pack(side="left", padx=10, pady=10)
 
+        self.suggestion_button = ctk.CTkButton(calc_frame, text="Get AI Suggestions", command=self.start_suggestion_thread, state="disabled")
+        self.suggestion_button.pack(side="left", padx=10, pady=10)
+
         self.result_label = ctk.CTkLabel(calc_frame, text="Result: -", font=ctk.CTkFont(size=14))
         self.result_label.pack(side="left", padx=10, pady=10)
+
+        # --- Suggestion Frame ---
+        suggestion_frame = ctk.CTkFrame(tab)
+        suggestion_frame.grid(row=2, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+        suggestion_frame.grid_columnconfigure(0, weight=1)
+        suggestion_frame.grid_rowconfigure(0, weight=1)
+        tab.grid_rowconfigure(2, weight=1) # Allow this row to expand
+
+        self.suggestion_output = ctk.CTkTextbox(suggestion_frame, state="disabled", wrap="word")
+        self.suggestion_output.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
     def update_textbox(self, textbox, text):
         """Helper function to safely update a textbox from any thread."""
@@ -667,6 +683,45 @@ class DMCommandCenterApp(ctk.CTk):
         
         self.tab_view.tab("AI Rules Lawyer").winfo_children()[2].configure(state="normal")
 
+    def start_suggestion_thread(self):
+        """Starts the encounter suggestion in a new thread."""
+        self.suggestion_button.configure(state="disabled", text="Getting suggestion...")
+        thread = threading.Thread(target=self.get_encounter_suggestions)
+        thread.daemon = True
+        thread.start()
+
+    def get_encounter_suggestions(self):
+        """Gathers context, calls the LLM, and puts the suggestion in the queue."""
+        try:
+            # 1. Gather context
+            party_level = self.party_level_var.get()
+            party_size = self.party_size_var.get()
+            selected_monsters = [name for name, var in self.monster_vars.items() if var.get() == 1]
+            monster_list_str = ", ".join(selected_monsters)
+            difficulty = self.result_label.cget("text") # Get the text from the result label
+
+            # 2. Construct the prompt
+            prompt = (
+                f"You are an expert Dungeon Master providing advice on a Dungeons & Dragons encounter. "
+                f"The party consists of {party_size} level {party_level} adventurers.\n"
+                f"The current encounter design includes the following monsters: {monster_list_str}.\n"
+                f"My calculation shows this encounter's difficulty is '{difficulty}'.\n\n"
+                "Please provide a brief, actionable suggestion to make this encounter more creative, thematic, or mechanically interesting. "
+                "Do not just suggest adding more monsters to increase difficulty. "
+                "Focus on synergy, environment, or a simple, unique monster ability. For example: 'Consider having the goblins use nets to restrain players before the bugbear attacks.' or 'This fight could be more interesting if it happened on a rickety rope bridge.'"
+            )
+
+            # 3. Call the LLM
+            response = self.world_forge_llm.invoke(prompt) # Re-using the gpt-4o instance
+            suggestion = response.content
+
+            # 4. Put the result in the queue
+            self.ambiance_queue.put(('suggestion', suggestion))
+
+        except Exception as e:
+            print(f"Error getting AI suggestion: {e}")
+            self.ambiance_queue.put(('suggestion', f"An error occurred: {e}"))
+
     def calculate_encounter(self):
         """Calculates and displays the encounter difficulty."""
         party_level = int(self.party_level_var.get())
@@ -676,6 +731,7 @@ class DMCommandCenterApp(ctk.CTk):
         
         if not selected_monsters:
             self.result_label.configure(text="Result: Please select at least one monster.")
+            self.suggestion_button.configure(state="disabled")
             return
 
         total_xp = sum(self.monsters[name]["XP"] for name in selected_monsters)
@@ -705,6 +761,7 @@ class DMCommandCenterApp(ctk.CTk):
 
         result_text = f"Result: {difficulty} ({int(adjusted_xp)} adjusted XP)"
         self.result_label.configure(text=result_text)
+        self.suggestion_button.configure(state="normal") # Enable the button
 
 # --- MAIN EXECUTION ---
 if __name__ == '__main__':
