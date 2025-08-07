@@ -12,3 +12,4 @@ SpeechRecognition
 pydub
 PyAudio
 numpy
+Pillow

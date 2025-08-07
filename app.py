@@ -9,6 +9,10 @@ import sounddevice as sd
 from pydub import AudioSegment
 from tkinter import filedialog
 from dotenv import load_dotenv, get_key, set_key
+from PIL import Image
+import requests
+import io
+from openai import OpenAI
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -123,6 +127,9 @@ class DMCommandCenterApp(ctk.CTk):
         self.current_music_mood = None
         self.stop_audio_flag = threading.Event()
 
+        # --- AI Clients ---
+        self.openai_client = OpenAI()
+
         # --- Window Configuration ---
         self.title("AI Dungeon Master's Command Center")
         self.geometry("800x650")
@@ -154,6 +161,11 @@ class DMCommandCenterApp(ctk.CTk):
             msg_type, data = self.ambiance_queue.get_nowait()
             if msg_type == 'log':
                 self.append_to_textbox(self.transcription_log, data + "\n")
+            elif msg_type == 'portrait':
+                image = Image.open(io.BytesIO(data))
+                image.thumbnail((400, 400))
+                ctk_image = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
+                self.portrait_label.configure(image=ctk_image, text="")
             elif msg_type == 'status':
                 self.ambiance_status_label.configure(text=f"Status: {data}")
             elif msg_type == 'mood':
@@ -295,31 +307,47 @@ class DMCommandCenterApp(ctk.CTk):
         """Creates the widgets for the World Forge tab."""
         tab = self.tab_view.tab("World Forge")
         
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(2, weight=1)
+        # Configure a 2-column grid
+        tab.grid_columnconfigure(0, weight=1) # Text content
+        tab.grid_columnconfigure(1, weight=1) # Image content
+        tab.grid_rowconfigure(0, weight=1)
 
-        prompt_label = ctk.CTkLabel(tab, text="Enter a prompt to generate a Quest, NPC, or Location:", font=ctk.CTkFont(weight="bold"))
-        prompt_label.grid(row=0, column=0, padx=10, pady=(10,0), sticky="w")
+        # --- Left Column: Text Generation ---
+        left_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        left_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        left_frame.grid_columnconfigure(0, weight=1)
+        left_frame.grid_rowconfigure(2, weight=1)
+
+        prompt_label = ctk.CTkLabel(left_frame, text="Enter a prompt to generate a Quest, NPC, or Location:", font=ctk.CTkFont(weight="bold"))
+        prompt_label.grid(row=0, column=0, padx=10, pady=(0,5), sticky="w")
         
-        self.forge_input = ctk.CTkTextbox(tab, height=100)
-        self.forge_input.grid(row=1, column=0, padx=10, pady=(5,5), sticky="nsew")
+        self.forge_input = ctk.CTkTextbox(left_frame, height=100)
+        self.forge_input.grid(row=1, column=0, padx=0, pady=5, sticky="nsew")
         self.forge_input.insert("0.0", "A grumpy dwarf blacksmith who has lost his lucky hammer.")
         
-        self.forge_output = ctk.CTkTextbox(tab, state="disabled")
-        self.forge_output.grid(row=2, column=0, padx=10, pady=(5,5), sticky="nsew")
-        
-        # Create a frame for the buttons
-        button_frame = ctk.CTkFrame(tab)
-        button_frame.grid(row=3, column=0, padx=10, pady=10, sticky="e")
+        self.forge_output = ctk.CTkTextbox(left_frame, state="disabled")
+        self.forge_output.grid(row=2, column=0, padx=0, pady=5, sticky="nsew")
+
+        button_frame = ctk.CTkFrame(left_frame)
+        button_frame.grid(row=3, column=0, padx=0, pady=10, sticky="e")
+
+        self.portrait_button = ctk.CTkButton(button_frame, text="Generate Portrait", command=self.start_portrait_thread, state="disabled")
+        self.portrait_button.pack(side="right", padx=(5, 0))
 
         self.generate_button = ctk.CTkButton(button_frame, text="Generate", command=self.start_world_forge_thread)
         self.generate_button.pack(side="right", padx=(5, 0))
 
         save_button = ctk.CTkButton(button_frame, text="Save", command=self.save_world_forge_output)
         save_button.pack(side="right", padx=(0, 5))
-        
-        tab.grid_rowconfigure(1, weight=1)
-        tab.grid_rowconfigure(2, weight=3)
+
+        # --- Right Column: Image Display ---
+        right_frame = ctk.CTkFrame(tab)
+        right_frame.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="nsew")
+        right_frame.grid_rowconfigure(0, weight=1)
+        right_frame.grid_columnconfigure(0, weight=1)
+
+        self.portrait_label = ctk.CTkLabel(right_frame, text="NPC Portrait will appear here.", text_color="gray")
+        self.portrait_label.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
     def save_world_forge_output(self):
         """Saves the content of the World Forge output to a text file."""
@@ -390,7 +418,6 @@ class DMCommandCenterApp(ctk.CTk):
             error_mic_label.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
             self.selected_mic_index = None
 
-
     def on_mic_select(self, selected_mic_name):
         """Callback for when a microphone is selected from the dropdown."""
         try:
@@ -409,6 +436,49 @@ class DMCommandCenterApp(ctk.CTk):
             self.api_status_label.configure(text="API Key saved. Please restart the application for changes to take effect.")
         else:
             self.api_status_label.configure(text="API Key cannot be empty.")
+
+    def start_portrait_thread(self):
+        """Starts the portrait generation in a new thread."""
+        self.portrait_button.configure(state="disabled", text="Generating...")
+        thread = threading.Thread(target=self.generate_npc_portrait)
+        thread.daemon = True
+        thread.start()
+
+    def generate_npc_portrait(self):
+        """Calls the DALL-E API to generate a portrait and prepares it for the UI."""
+        npc_description = self.forge_output.get("0.0", "end-1c")
+        if not npc_description.strip():
+            print("No NPC description to generate a portrait from.")
+            self.portrait_button.configure(state="normal", text="Generate Portrait")
+            return
+
+        prompt = (
+            f"A digital painting of a fantasy character, focused on the face and upper body. "
+            f"The character is: '{npc_description}'. "
+            "Style: painterly, detailed, character concept art. No text, no signatures, no borders."
+        )
+
+        try:
+            response = self.openai_client.images.generate(
+                model="dall-e-3",
+                prompt=prompt,
+                n=1,
+                size="1024x1024",
+                quality="standard"
+            )
+            image_url = response.data[0].url
+
+            # Download the image and send it to the queue
+            image_response = requests.get(image_url)
+            image_response.raise_for_status() # Raise an exception for bad status codes
+            image_data = image_response.content
+            self.ambiance_queue.put(('portrait', image_data))
+
+        except Exception as e:
+            print(f"Error generating portrait: {e}")
+            self.ambiance_queue.put(('log', f"ERROR: Could not generate portrait. {e}"))
+
+        self.portrait_button.configure(state="normal", text="Generate Portrait")
 
     def analyze_text_for_audio(self, text):
         """Analyzes text for keywords and returns an audio trigger key."""
@@ -566,7 +636,8 @@ class DMCommandCenterApp(ctk.CTk):
         response = self.world_forge_llm.invoke(full_prompt)
         
         self.update_textbox(self.forge_output, response.content)
-        self.tab_view.tab("World Forge").winfo_children()[3].configure(state="normal", text="Generate")
+        self.generate_button.configure(state="normal", text="Generate")
+        self.portrait_button.configure(state="normal")
 
     def start_rules_lawyer_thread(self, event=None):
         """Starts a new thread for the rules lawyer."""
