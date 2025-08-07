@@ -8,3 +8,7 @@ tiktoken
 pypdf
 sounddevice
 scipy
+SpeechRecognition
+pydub
+PyAudio
+numpy

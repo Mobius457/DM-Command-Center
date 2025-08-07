@@ -4,6 +4,9 @@ import customtkinter as ctk
 import threading
 import queue
 import speech_recognition as sr
+import numpy as np
+import sounddevice as sd
+from pydub import AudioSegment
 from tkinter import filedialog
 from dotenv import load_dotenv, get_key, set_key
 
@@ -35,6 +38,21 @@ ENCOUNTER_MULTIPLIERS = {
     11: 3.0, 12: 3.0, 13: 3.0, 14: 3.0,
     15: 4.0
     # A multiplier of x4 is used for 15 or more monsters
+}
+
+# --- AUDIO KEYWORD MAPPING ---
+AUDIO_TRIGGERS = {
+    "music_combat": ["fight", "combat", "attack", "damage", "hit", "sword", "arrow", "axe", "initiative", "roll for damage"],
+    "music_tavern": ["tavern", "inn", "bar", "ale", "beer", "quest", "barkeep", "gossip"],
+    "music_tense": ["sneak", "stealth", "trap", "danger", "creeping", "shadows", "darkness", "eerie"],
+    "sfx_sword": ["sword hits", "clash of steel", "parry"],
+}
+
+AUDIO_FILES = {
+    "music_combat": "audio/music/454_Broken_Pantheon.mp3",
+    "music_tavern": "audio/ambiance/446_Between_Adventures.mp3",
+    "music_tense": "audio/music/212_Witch_Mountain.mp3",
+    "sfx_sword": "audio/sfx/sword-hit-7160.mp3",
 }
 
 # --- AI INITIALIZATION ---
@@ -101,6 +119,9 @@ class DMCommandCenterApp(ctk.CTk):
         self.listener_thread = None
         self.ambiance_queue = queue.Queue()
         self.selected_mic_index = 0
+        self.audio_thread = None
+        self.current_music_mood = None
+        self.stop_audio_flag = threading.Event()
 
         # --- Window Configuration ---
         self.title("AI Dungeon Master's Command Center")
@@ -135,6 +156,8 @@ class DMCommandCenterApp(ctk.CTk):
                 self.append_to_textbox(self.transcription_log, data + "\n")
             elif msg_type == 'status':
                 self.ambiance_status_label.configure(text=f"Status: {data}")
+            elif msg_type == 'mood':
+                self.ambiance_mood_label.configure(text=f"Mood: {data}")
             elif msg_type == 'button_state':
                 self.ambiance_button.configure(state=data)
             elif msg_type == 'button_text':
@@ -202,6 +225,11 @@ class DMCommandCenterApp(ctk.CTk):
                     
                     text = r.recognize_google(audio)
                     self.ambiance_queue.put(('log', f"Heard: {text}"))
+
+                    # Analyze text and trigger audio
+                    trigger = self.analyze_text_for_audio(text)
+                    if trigger:
+                        self.trigger_audio(trigger)
                 except sr.UnknownValueError:
                     pass 
                 except sr.RequestError as e:
@@ -236,6 +264,9 @@ class DMCommandCenterApp(ctk.CTk):
 
         self.ambiance_status_label = ctk.CTkLabel(control_frame, text="Status: Idle")
         self.ambiance_status_label.pack(side="left", padx=10, pady=10)
+
+        self.ambiance_mood_label = ctk.CTkLabel(control_frame, text="Mood: -")
+        self.ambiance_mood_label.pack(side="left", padx=10, pady=10)
 
         # Log Frame
         log_frame = ctk.CTkFrame(tab)
@@ -378,6 +409,65 @@ class DMCommandCenterApp(ctk.CTk):
             self.api_status_label.configure(text="API Key saved. Please restart the application for changes to take effect.")
         else:
             self.api_status_label.configure(text="API Key cannot be empty.")
+
+    def analyze_text_for_audio(self, text):
+        """Analyzes text for keywords and returns an audio trigger key."""
+        text = text.lower()
+        for trigger, keywords in AUDIO_TRIGGERS.items():
+            if any(keyword in text for keyword in keywords):
+                return trigger
+        return None
+
+    def trigger_audio(self, trigger_key):
+        """Controls the audio playback based on a trigger key."""
+        if trigger_key.startswith("sfx_"):
+            # Play sound effects in a new, short-lived thread
+            sfx_thread = threading.Thread(target=self.run_audio_player, args=(trigger_key,))
+            sfx_thread.daemon = True
+            sfx_thread.start()
+        elif trigger_key.startswith("music_"):
+            # If the requested music is already playing, do nothing
+            if self.current_music_mood == trigger_key:
+                return
+            
+            # Stop any currently playing music
+            if self.audio_thread and self.audio_thread.is_alive():
+                self.stop_audio_flag.set()
+                self.audio_thread.join() # Wait for the thread to finish
+            
+            # Start new music
+            self.current_music_mood = trigger_key
+            self.ambiance_queue.put(('mood', trigger_key.replace("music_", "").capitalize()))
+            self.stop_audio_flag.clear()
+            self.audio_thread = threading.Thread(target=self.run_audio_player, args=(trigger_key,))
+            self.audio_thread.daemon = True
+            self.audio_thread.start()
+
+    def run_audio_player(self, trigger_key):
+        """
+        Plays an audio file based on a trigger.
+        Music loops until the stop flag is set. SFX play once.
+        """
+        filepath = AUDIO_FILES.get(trigger_key)
+        if not filepath or not os.path.exists(filepath):
+            print(f"Audio file not found for trigger: {trigger_key}")
+            return
+
+        try:
+            song = AudioSegment.from_mp3(filepath)
+            samples = np.array(song.get_array_of_samples()).reshape(-1, song.channels)
+            
+            if trigger_key.startswith("music_"):
+                # Loop music until flag is set
+                while not self.stop_audio_flag.is_set():
+                    sd.play(samples, song.frame_rate)
+                    sd.wait()
+            else: # Sound effect
+                sd.play(samples, song.frame_rate)
+                sd.wait()
+
+        except Exception as e:
+            print(f"Error playing audio for {trigger_key}: {e}")
 
     def setup_rules_lawyer_tab(self):
         """Creates the widgets for the AI Rules Lawyer tab."""
