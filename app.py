@@ -455,6 +455,11 @@ class DMCommandCenterApp(ctk.CTk):
             self.portrait_button.configure(state="normal", text="Generate Portrait")
             return
 
+        # Truncate description to avoid exceeding API prompt limits
+        max_desc_len = 3750
+        if len(npc_description) > max_desc_len:
+            npc_description = npc_description[:max_desc_len]
+
         prompt = (
             f"A digital painting of a fantasy character, focused on the face and upper body. "
             f"The character is: '{npc_description}'. "
