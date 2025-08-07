@@ -11,3 +11,4 @@ scipy
 SpeechRecognition
 pydub
 PyAudio
+numpy
