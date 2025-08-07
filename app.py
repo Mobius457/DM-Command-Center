@@ -159,6 +159,13 @@ class DMCommandCenterApp(ctk.CTk):
         The core function for the ambiance engine.
         Runs in a background thread, listens for audio, and transcribes it.
         """
+        # Log the list of microphones found
+        try:
+            mic_list = sr.Microphone.list_microphone_names()
+            self.ambiance_queue.put(('log', f"Microphones found: {mic_list}"))
+        except Exception as e:
+            self.ambiance_queue.put(('log', f"Error getting microphone list: {e}"))
+            
         # Check for microphone availability first
         try:
             if not sr.Microphone.list_microphone_names():
