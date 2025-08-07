@@ -636,7 +636,7 @@ class DMCommandCenterApp(ctk.CTk):
 
     def start_world_forge_thread(self):
         """Starts a new thread for the world forge to prevent UI freezing."""
-        self.tab_view.tab("World Forge").winfo_children()[3].configure(state="disabled", text="Generating...")
+        self.generate_button.configure(state="disabled", text="Generating...")
         thread = threading.Thread(target=self.run_world_forge)
         thread.start()
 
