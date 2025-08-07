@@ -130,6 +130,9 @@ class DMCommandCenterApp(ctk.CTk):
         # --- AI Clients ---
         self.openai_client = OpenAI()
 
+        # --- Map Forge State ---
+        self.map_image_data = None
+
         # --- Window Configuration ---
         self.title("AI Dungeon Master's Command Center")
         self.geometry("800x650")
@@ -143,6 +146,7 @@ class DMCommandCenterApp(ctk.CTk):
         self.tab_view.add("AI Rules Lawyer")
         self.tab_view.add("Encounter Architect")
         self.tab_view.add("Ambiance Engine")
+        self.tab_view.add("Map Forge")
         self.tab_view.add("Settings")
         
         # --- Configure Tabs ---
@@ -150,6 +154,7 @@ class DMCommandCenterApp(ctk.CTk):
         self.setup_rules_lawyer_tab()
         self.setup_encounter_architect_tab()
         self.setup_ambiance_tab()
+        self.setup_map_forge_tab()
         self.setup_settings_tab()
 
         # --- Start Queue Processor ---
@@ -174,6 +179,14 @@ class DMCommandCenterApp(ctk.CTk):
                 self.ambiance_button.configure(state=data)
             elif msg_type == 'button_text':
                 self.ambiance_button.configure(text=data)
+            elif msg_type == 'map':
+                image = Image.open(io.BytesIO(data))
+                self.map_image_data = data # Save raw bytes for saving
+                image.thumbnail((800, 800)) # Larger thumbnail for map
+                ctk_image = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
+                self.map_display_label.configure(image=ctk_image, text="")
+                self.save_map_button.configure(state="normal")
+                self.generate_map_button.configure(state="normal", text="Generate Map")
             elif msg_type == 'suggestion':
                 self.update_textbox(self.suggestion_output, data)
                 self.suggestion_button.configure(state="normal", text="Get AI Suggestions")
@@ -262,6 +275,109 @@ class DMCommandCenterApp(ctk.CTk):
         self.ambiance_queue.put(('button_text', "Start Listening"))
         self.ambiance_queue.put(('button_state', "normal"))
         self.ambiance_queue.put(('log', "Listener stopped."))
+
+    def setup_map_forge_tab(self):
+        """Creates the widgets for the Map Forge tab."""
+        tab = self.tab_view.tab("Map Forge")
+
+        # Configure a 2-column grid
+        tab.grid_columnconfigure(0, weight=1) # Controls
+        tab.grid_columnconfigure(1, weight=2) # Image display
+        tab.grid_rowconfigure(0, weight=1)
+
+        # --- Left Column: Controls ---
+        left_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        left_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        left_frame.grid_columnconfigure(0, weight=1)
+        left_frame.grid_rowconfigure(1, weight=1) # Allow textbox to expand
+
+        prompt_label = ctk.CTkLabel(left_frame, text="Describe the map you want to create:", font=ctk.CTkFont(weight="bold"))
+        prompt_label.grid(row=0, column=0, padx=10, pady=(0,5), sticky="w")
+
+        self.map_input = ctk.CTkTextbox(left_frame, height=150)
+        self.map_input.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        self.map_input.insert("0.0", "A small, ruined keep on a cliff overlooking the sea.")
+
+        button_frame = ctk.CTkFrame(left_frame)
+        button_frame.grid(row=2, column=0, padx=10, pady=10, sticky="e")
+
+        self.generate_map_button = ctk.CTkButton(button_frame, text="Generate Map", command=self.start_map_generation_thread)
+        self.generate_map_button.pack(side="right", padx=(5, 0))
+
+        self.save_map_button = ctk.CTkButton(button_frame, text="Save Map", command=self.save_map, state="disabled")
+        self.save_map_button.pack(side="right", padx=(0, 5))
+
+        # --- Right Column: Image Display ---
+        right_frame = ctk.CTkFrame(tab)
+        right_frame.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="nsew")
+        right_frame.grid_rowconfigure(0, weight=1)
+        right_frame.grid_columnconfigure(0, weight=1)
+
+        self.map_display_label = ctk.CTkLabel(right_frame, text="Generated map will appear here.", text_color="gray")
+        self.map_display_label.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+
+    def start_map_generation_thread(self):
+        """Starts the map generation in a new thread."""
+        self.generate_map_button.configure(state="disabled", text="Generating...")
+        self.save_map_button.configure(state="disabled") # Disable save button during generation
+        thread = threading.Thread(target=self.generate_map)
+        thread.daemon = True
+        thread.start()
+
+    def generate_map(self):
+        """Constructs a prompt and calls the DALL-E API to generate a map."""
+        try:
+            user_description = self.map_input.get("0.0", "end-1c")
+            if not user_description.strip():
+                print("Map description is empty.")
+                self.generate_map_button.configure(state="normal", text="Generate Map")
+                return
+
+            prompt = (
+                f"A top-down, 2D, black and white battle map for a tabletop role-playing game like Dungeons and Dragons. "
+                f"The style should be clean and clear line art, suitable for printing. "
+                f"The map should depict: {user_description}. "
+                "Do not include a grid, text, icons, or any other distracting elements."
+            )
+
+            response = self.openai_client.images.generate(
+                model="dall-e-3",
+                prompt=prompt,
+                n=1,
+                size="1024x1024",
+                quality="standard"
+            )
+            image_url = response.data[0].url
+
+            image_response = requests.get(image_url)
+            image_response.raise_for_status()
+            image_data = image_response.content
+            self.ambiance_queue.put(('map', image_data))
+
+        except Exception as e:
+            print(f"Error generating map: {e}")
+            self.ambiance_queue.put(('log', f"ERROR: Could not generate map. {e}"))
+            self.generate_map_button.configure(state="normal", text="Generate Map")
+
+    def save_map(self):
+        """Saves the currently displayed map image to a file."""
+        if self.map_image_data is None:
+            print("No map image data to save.")
+            return
+
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG Image", "*.png"), ("JPEG Image", "*.jpg"), ("All Files", "*.*")],
+            title="Save Map Image"
+        )
+
+        if filepath:
+            try:
+                with open(filepath, "wb") as f: # Open in write-bytes mode
+                    f.write(self.map_image_data)
+                print(f"Map saved to {filepath}")
+            except Exception as e:
+                print(f"Error saving map: {e}")
 
     def setup_ambiance_tab(self):
         """Creates the widgets for the Dynamic Ambiance Engine tab."""
