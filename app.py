@@ -1,5 +1,6 @@
 import os
 import csv
+from customtkinter.windows.widgets.ctk_input_dialog import CTkInputDialog
 import customtkinter as ctk
 import threading
 import queue
@@ -13,6 +14,7 @@ from PIL import Image
 import requests
 import io
 from openai import OpenAI
+import database
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -111,6 +113,19 @@ class DMCommandCenterApp(ctk.CTk):
     def __init__(self, rules_lawyer_chain, world_forge_llm):
         super().__init__()
 
+        # --- Campaign Management Bar ---
+        campaign_bar_frame = ctk.CTkFrame(self, height=50)
+        campaign_bar_frame.pack(side="top", fill="x", padx=10, pady=(10, 0))
+
+        new_campaign_button = ctk.CTkButton(campaign_bar_frame, text="New Campaign", command=self.new_campaign)
+        new_campaign_button.pack(side="left", padx=10, pady=10)
+
+        open_campaign_button = ctk.CTkButton(campaign_bar_frame, text="Open Campaign", command=self.open_campaign)
+        open_campaign_button.pack(side="left", padx=10, pady=10)
+        
+        self.campaign_name_label = ctk.CTkLabel(campaign_bar_frame, text="Campaign: None", font=ctk.CTkFont(weight="bold"))
+        self.campaign_name_label.pack(side="left", padx=10, pady=10)
+
 
         # --- AI Model & Data Storage ---
         self.rules_lawyer_chain = rules_lawyer_chain
@@ -133,6 +148,13 @@ class DMCommandCenterApp(ctk.CTk):
         # --- Map Forge State ---
         self.map_image_data = None
 
+        # --- World Forge State ---
+        self.portrait_image_data = None
+        
+        # --- Campaign State ---
+        self.current_campaign_path = None
+        self.campaign_name_label = None
+
         # --- Window Configuration ---
         self.title("AI Dungeon Master's Command Center")
         self.geometry("800x650")
@@ -147,6 +169,7 @@ class DMCommandCenterApp(ctk.CTk):
         self.tab_view.add("Encounter Architect")
         self.tab_view.add("Ambiance Engine")
         self.tab_view.add("Map Forge")
+        self.tab_view.add("Campaign Explorer")
         self.tab_view.add("Settings")
         
         # --- Configure Tabs ---
@@ -155,6 +178,7 @@ class DMCommandCenterApp(ctk.CTk):
         self.setup_encounter_architect_tab()
         self.setup_ambiance_tab()
         self.setup_map_forge_tab()
+        self.setup_campaign_explorer_tab()
         self.setup_settings_tab()
 
         # --- Start Queue Processor ---
@@ -167,6 +191,7 @@ class DMCommandCenterApp(ctk.CTk):
             if msg_type == 'log':
                 self.append_to_textbox(self.transcription_log, data + "\n")
             elif msg_type == 'portrait':
+                self.portrait_image_data = data # Save for database
                 image = Image.open(io.BytesIO(data))
                 image.thumbnail((400, 400))
                 ctk_image = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
@@ -379,6 +404,103 @@ class DMCommandCenterApp(ctk.CTk):
             except Exception as e:
                 print(f"Error saving map: {e}")
 
+    def new_campaign(self):
+        """Creates a new campaign database file."""
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".db",
+            filetypes=[("Campaign Database", "*.db"), ("All Files", "*.*")],
+            title="Create New Campaign"
+        )
+        if filepath:
+            database.init_db(filepath)
+            self.current_campaign_path = filepath
+            campaign_name = os.path.basename(filepath)
+            self.campaign_name_label.configure(text=f"Campaign: {campaign_name}")
+            # Here you would also enable/disable other UI elements
+    
+    def open_campaign(self):
+        """Opens an existing campaign database file."""
+        filepath = filedialog.askopenfilename(
+            filetypes=[("Campaign Database", "*.db"), ("All Files", "*.*")],
+            title="Open Campaign"
+        )
+        if filepath:
+            self.current_campaign_path = filepath
+            campaign_name = os.path.basename(filepath)
+            self.campaign_name_label.configure(text=f"Campaign: {campaign_name}")
+            self.populate_campaign_explorer()
+    
+    def new_campaign(self):
+        """Creates a new campaign database file."""
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".db",
+            filetypes=[("Campaign Database", "*.db"), ("All Files", "*.*")],
+            title="Create New Campaign"
+        )
+        if filepath:
+            database.init_db(filepath)
+            self.current_campaign_path = filepath
+            campaign_name = os.path.basename(filepath)
+            self.campaign_name_label.configure(text=f"Campaign: {campaign_name}")
+            self.populate_campaign_explorer()
+
+    def setup_campaign_explorer_tab(self):
+        """Creates the widgets for the Campaign Explorer tab."""
+        tab = self.tab_view.tab("Campaign Explorer")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(0, weight=1)
+
+        self.campaign_explorer_frame = ctk.CTkScrollableFrame(tab, label_text="Saved NPCs")
+        self.campaign_explorer_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+
+    def populate_campaign_explorer(self):
+        """Clears and repopulates the campaign explorer with items from the DB."""
+        # Clear existing widgets
+        for widget in self.campaign_explorer_frame.winfo_children():
+            widget.destroy()
+
+        # Populate with NPCs
+        npcs = database.get_all_npcs(self.current_campaign_path)
+        for npc_id, npc_name in npcs:
+            npc_button = ctk.CTkButton(
+                self.campaign_explorer_frame, 
+                text=npc_name, 
+                command=lambda npc_id=npc_id: self.load_npc(npc_id)
+            )
+            npc_button.pack(fill="x", padx=5, pady=2)
+    
+    def load_npc(self, npc_id):
+        """Loads a specific NPC's data from the database into the World Forge."""
+        try:
+            conn = sqlite3.connect(self.current_campaign_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT name, description, portrait FROM npcs WHERE id = ?", (npc_id,))
+            npc = cursor.fetchone()
+            if npc:
+                name, description, portrait_data = npc
+                
+                # Update World Forge UI
+                self.update_textbox(self.forge_output, description)
+                
+                # Update portrait
+                if portrait_data:
+                    self.portrait_image_data = portrait_data
+                    image = Image.open(io.BytesIO(portrait_data))
+                    image.thumbnail((400, 400))
+                    ctk_image = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
+                    self.portrait_label.configure(image=ctk_image, text="")
+                else:
+                    self.portrait_label.configure(image=None, text="No portrait available.")
+                
+                # Switch to the World Forge tab to show the loaded content
+                self.tab_view.set("World Forge")
+
+        except sqlite3.Error as e:
+            print(f"Database error loading NPC: {e}")
+        finally:
+            if conn:
+                conn.close()
+
     def setup_ambiance_tab(self):
         """Creates the widgets for the Dynamic Ambiance Engine tab."""
         tab = self.tab_view.tab("Ambiance Engine")
@@ -469,25 +591,39 @@ class DMCommandCenterApp(ctk.CTk):
         self.portrait_label.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
     def save_world_forge_output(self):
-        """Saves the content of the World Forge output to a text file."""
-        content = self.forge_output.get("0.0", "end-1c")
-        if not content.strip():
+        """Saves the generated NPC to the active campaign database."""
+        if not self.current_campaign_path:
+            print("No active campaign. Please create or open a campaign first.")
+            # In a real app, you'd show a user-friendly dialog here.
+            return
+
+        description = self.forge_output.get("0.0", "end-1c")
+        if not description.strip():
             print("No content to save.")
             return
 
-        filepath = filedialog.asksaveasfilename(
-            defaultextension=".txt",
-            filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
-            title="Save World Forge Content"
-        )
+        # Prompt user for NPC name
+        dialog = CTkInputDialog(text="Enter a name for this NPC:", title="Save NPC")
+        npc_name = dialog.get_input()
 
-        if filepath:
-            try:
-                with open(filepath, "w", encoding="utf-8") as f:
-                    f.write(content)
-                print(f"Content saved to {filepath}")
-            except Exception as e:
-                print(f"Error saving file: {e}")
+        if not npc_name or not npc_name.strip():
+            print("Save cancelled: NPC name cannot be empty.")
+            return
+            
+        try:
+            conn = sqlite3.connect(self.current_campaign_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO npcs (name, description, portrait) VALUES (?, ?, ?)",
+                (npc_name, description, self.portrait_image_data)
+            )
+            conn.commit()
+            print(f"NPC '{npc_name}' saved to campaign.")
+        except sqlite3.Error as e:
+            print(f"Database error saving NPC: {e}")
+        finally:
+            if conn:
+                conn.close()
 
     def setup_settings_tab(self):
         """Creates the widgets for the Settings tab."""
