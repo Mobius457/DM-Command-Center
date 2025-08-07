@@ -2,6 +2,8 @@ import os
 import csv
 import customtkinter as ctk
 import threading
+import queue
+import speech_recognition as sr
 from dotenv import load_dotenv
 
 from langchain_community.document_loaders import PyPDFLoader
@@ -86,23 +88,17 @@ class DMCommandCenterApp(ctk.CTk):
     def __init__(self, rules_lawyer_chain, world_forge_llm):
         super().__init__()
 
-        # Inside the __init__ method...
-        self.tab_view.add("World Forge")
-        self.tab_view.add("AI Rules Lawyer")
-        self.tab_view.add("Encounter Architect")
-        self.tab_view.add("Ambiance Engine") # <-- ADD THIS LINE
-
-        # --- Configure Tabs ---
-        self.setup_world_forge_tab()
-        self.setup_rules_lawyer_tab()
-        self.setup_encounter_architect_tab()
-        self.setup_ambiance_tab() # <-- ADD THIS LINE
 
         # --- AI Model & Data Storage ---
         self.rules_lawyer_chain = rules_lawyer_chain
         self.world_forge_llm = world_forge_llm
         self.rules_chat_history = []
         self.monsters = self.load_monsters()
+
+        # --- Ambiance Engine State ---
+        self.is_listening = False
+        self.listener_thread = None
+        self.ambiance_queue = queue.Queue()
 
         # --- Window Configuration ---
         self.title("AI Dungeon Master's Command Center")
@@ -123,6 +119,76 @@ class DMCommandCenterApp(ctk.CTk):
         self.setup_encounter_architect_tab()
         self.setup_ambiance_tab()
 
+        # --- Start Queue Processor ---
+        self.process_ambiance_queue()
+
+    def process_ambiance_queue(self):
+        """Processes messages from the ambiance queue to update the UI safely."""
+        try:
+            msg_type, data = self.ambiance_queue.get_nowait()
+            if msg_type == 'log':
+                self.append_to_textbox(self.transcription_log, data + "\n")
+            elif msg_type == 'status':
+                self.ambiance_status_label.configure(text=f"Status: {data}")
+            elif msg_type == 'button_state':
+                self.ambiance_button.configure(state=data)
+            elif msg_type == 'button_text':
+                self.ambiance_button.configure(text=data)
+        except queue.Empty:
+            pass
+        finally:
+            # Check again after 100ms
+            self.after(100, self.process_ambiance_queue)
+
+    def toggle_listening(self):
+        """Starts or stops the ambiance engine listening thread."""
+        if self.is_listening:
+            self.is_listening = False
+            self.ambiance_queue.put(('status', "Stopping..."))
+            self.ambiance_queue.put(('button_state', "disabled"))
+        else:
+            self.is_listening = True
+            self.listener_thread = threading.Thread(target=self.run_ambiance_engine)
+            self.listener_thread.daemon = True
+            self.listener_thread.start()
+            self.ambiance_queue.put(('status', "Listening..."))
+            self.ambiance_queue.put(('button_text', "Stop Listening"))
+
+    def run_ambiance_engine(self):
+        """
+        The core function for the ambiance engine.
+        Runs in a background thread, listens for audio, and transcribes it.
+        """
+        r = sr.Recognizer()
+        mic = sr.Microphone()
+
+        with mic as source:
+            self.ambiance_queue.put(('log', "Calibrating for ambient noise..."))
+            r.adjust_for_ambient_noise(source)
+            self.ambiance_queue.put(('log', "Calibration complete. Listening..."))
+
+        while self.is_listening:
+            try:
+                with mic as source:
+                    audio = r.listen(source)
+
+                text = r.recognize_google(audio)
+                self.ambiance_queue.put(('log', f"Heard: {text}"))
+            except sr.UnknownValueError:
+                pass
+            except sr.RequestError as e:
+                self.ambiance_queue.put(('log', f"API error: {e}"))
+                self.is_listening = False
+            except Exception as e:
+                self.ambiance_queue.put(('log', f"An unexpected error occurred: {e}"))
+                self.is_listening = False
+
+        # Thread finished, update UI state via the queue
+        self.ambiance_queue.put(('status', "Idle"))
+        self.ambiance_queue.put(('button_text', "Start Listening"))
+        self.ambiance_queue.put(('button_state', "normal"))
+        self.ambiance_queue.put(('log', "Listener stopped."))
+
     def setup_ambiance_tab(self):
         """Creates the widgets for the Dynamic Ambiance Engine tab."""
         tab = self.tab_view.tab("Ambiance Engine")
@@ -134,7 +200,7 @@ class DMCommandCenterApp(ctk.CTk):
         control_frame = ctk.CTkFrame(tab)
         control_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
 
-        self.ambiance_button = ctk.CTkButton(control_frame, text="Start Listening")
+        self.ambiance_button = ctk.CTkButton(control_frame, text="Start Listening", command=self.toggle_listening)
         self.ambiance_button.pack(side="left", padx=10, pady=10)
 
         self.ambiance_status_label = ctk.CTkLabel(control_frame, text="Status: Idle")
