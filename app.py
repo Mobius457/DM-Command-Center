@@ -159,29 +159,48 @@ class DMCommandCenterApp(ctk.CTk):
         The core function for the ambiance engine.
         Runs in a background thread, listens for audio, and transcribes it.
         """
+        # Check for microphone availability first
+        try:
+            if not sr.Microphone.list_microphone_names():
+                self.ambiance_queue.put(('log', "ERROR: No microphone found on this system."))
+                self.is_listening = False
+        except Exception as e:
+            self.ambiance_queue.put(('log', f"ERROR: Could not check for microphones. {e}"))
+            self.is_listening = False
+
+        if not self.is_listening:
+            self.ambiance_queue.put(('status', "Error"))
+            self.ambiance_queue.put(('button_text', "Start Listening"))
+            self.ambiance_queue.put(('button_state', "normal"))
+            return
+
         r = sr.Recognizer()
         mic = sr.Microphone()
 
-        with mic as source:
-            self.ambiance_queue.put(('log', "Calibrating for ambient noise..."))
-            r.adjust_for_ambient_noise(source)
-            self.ambiance_queue.put(('log', "Calibration complete. Listening..."))
+        try:
+            with mic as source:
+                self.ambiance_queue.put(('log', "Calibrating for ambient noise..."))
+                r.adjust_for_ambient_noise(source)
+                self.ambiance_queue.put(('log', "Calibration complete. Listening..."))
 
-        while self.is_listening:
-            try:
-                with mic as source:
-                    audio = r.listen(source)
+            while self.is_listening:
+                try:
+                    with mic as source:
+                        audio = r.listen(source)
 
-                text = r.recognize_google(audio)
-                self.ambiance_queue.put(('log', f"Heard: {text}"))
-            except sr.UnknownValueError:
-                pass
-            except sr.RequestError as e:
-                self.ambiance_queue.put(('log', f"API error: {e}"))
-                self.is_listening = False
-            except Exception as e:
-                self.ambiance_queue.put(('log', f"An unexpected error occurred: {e}"))
-                self.is_listening = False
+                    text = r.recognize_google(audio)
+                    self.ambiance_queue.put(('log', f"Heard: {text}"))
+                except sr.UnknownValueError:
+                    pass
+                except sr.RequestError as e:
+                    self.ambiance_queue.put(('log', f"API error: {e}"))
+                    self.is_listening = False
+                except Exception as e:
+                    self.ambiance_queue.put(('log', f"An audio error occurred: {e}"))
+                    self.is_listening = False
+        except Exception as e:
+            self.ambiance_queue.put(('log', f"ERROR: Failed to open microphone. Is it in use? Details: {e}"))
+            self.is_listening = False
 
         # Thread finished, update UI state via the queue
         self.ambiance_queue.put(('status', "Idle"))
