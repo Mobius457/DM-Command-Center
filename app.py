@@ -4,7 +4,8 @@ import customtkinter as ctk
 import threading
 import queue
 import speech_recognition as sr
-from dotenv import load_dotenv
+from tkinter import filedialog
+from dotenv import load_dotenv, get_key, set_key
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -99,11 +100,13 @@ class DMCommandCenterApp(ctk.CTk):
         self.is_listening = False
         self.listener_thread = None
         self.ambiance_queue = queue.Queue()
+        self.selected_mic_index = 0
 
         # --- Window Configuration ---
         self.title("AI Dungeon Master's Command Center")
         self.geometry("800x650")
         ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("green")
 
         # --- Create Tabs ---
         self.tab_view = ctk.CTkTabview(self)
@@ -112,12 +115,14 @@ class DMCommandCenterApp(ctk.CTk):
         self.tab_view.add("AI Rules Lawyer")
         self.tab_view.add("Encounter Architect")
         self.tab_view.add("Ambiance Engine")
+        self.tab_view.add("Settings")
         
         # --- Configure Tabs ---
         self.setup_world_forge_tab()
         self.setup_rules_lawyer_tab()
         self.setup_encounter_architect_tab()
         self.setup_ambiance_tab()
+        self.setup_settings_tab()
 
         # --- Start Queue Processor ---
         self.process_ambiance_queue()
@@ -182,7 +187,7 @@ class DMCommandCenterApp(ctk.CTk):
             return
 
         r = sr.Recognizer()
-        mic = sr.Microphone()
+        mic = sr.Microphone(device_index=self.selected_mic_index)
 
         try:
             with mic as source:
@@ -236,7 +241,7 @@ class DMCommandCenterApp(ctk.CTk):
         log_frame = ctk.CTkFrame(tab)
         log_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
 
-        log_label = ctk.CTkLabel(log_frame, text="Transcription Log")
+        log_label = ctk.CTkLabel(log_frame, text="Transcription Log", font=ctk.CTkFont(weight="bold"))
         log_label.pack(padx=10, pady=(10,0))
 
         self.transcription_log = ctk.CTkTextbox(log_frame, state="disabled")
@@ -262,21 +267,117 @@ class DMCommandCenterApp(ctk.CTk):
         tab.grid_columnconfigure(0, weight=1)
         tab.grid_rowconfigure(2, weight=1)
 
-        prompt_label = ctk.CTkLabel(tab, text="Enter a prompt to generate a Quest, NPC, or Location:")
+        prompt_label = ctk.CTkLabel(tab, text="Enter a prompt to generate a Quest, NPC, or Location:", font=ctk.CTkFont(weight="bold"))
         prompt_label.grid(row=0, column=0, padx=10, pady=(10,0), sticky="w")
         
         self.forge_input = ctk.CTkTextbox(tab, height=100)
-        self.forge_input.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        self.forge_input.grid(row=1, column=0, padx=10, pady=(5,5), sticky="nsew")
         self.forge_input.insert("0.0", "A grumpy dwarf blacksmith who has lost his lucky hammer.")
         
         self.forge_output = ctk.CTkTextbox(tab, state="disabled")
-        self.forge_output.grid(row=2, column=0, padx=10, pady=5, sticky="nsew")
+        self.forge_output.grid(row=2, column=0, padx=10, pady=(5,5), sticky="nsew")
         
-        generate_button = ctk.CTkButton(tab, text="Generate", command=self.start_world_forge_thread)
-        generate_button.grid(row=3, column=0, padx=10, pady=10, sticky="e")
+        # Create a frame for the buttons
+        button_frame = ctk.CTkFrame(tab)
+        button_frame.grid(row=3, column=0, padx=10, pady=10, sticky="e")
+
+        self.generate_button = ctk.CTkButton(button_frame, text="Generate", command=self.start_world_forge_thread)
+        self.generate_button.pack(side="right", padx=(5, 0))
+
+        save_button = ctk.CTkButton(button_frame, text="Save", command=self.save_world_forge_output)
+        save_button.pack(side="right", padx=(0, 5))
         
         tab.grid_rowconfigure(1, weight=1)
         tab.grid_rowconfigure(2, weight=3)
+
+    def save_world_forge_output(self):
+        """Saves the content of the World Forge output to a text file."""
+        content = self.forge_output.get("0.0", "end-1c")
+        if not content.strip():
+            print("No content to save.")
+            return
+
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
+            title="Save World Forge Content"
+        )
+
+        if filepath:
+            try:
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(content)
+                print(f"Content saved to {filepath}")
+            except Exception as e:
+                print(f"Error saving file: {e}")
+
+    def setup_settings_tab(self):
+        """Creates the widgets for the Settings tab."""
+        tab = self.tab_view.tab("Settings")
+        tab.grid_columnconfigure(0, weight=1)
+
+        # --- API Key Management ---
+        api_frame = ctk.CTkFrame(tab)
+        api_frame.grid(row=0, column=0, padx=20, pady=(20, 10), sticky="ew")
+        api_frame.grid_columnconfigure(1, weight=1)
+
+        api_label = ctk.CTkLabel(api_frame, text="OpenAI API Key:", font=ctk.CTkFont(weight="bold"))
+        api_label.grid(row=0, column=0, padx=10, pady=10)
+
+        self.api_key_entry = ctk.CTkEntry(api_frame, show="*")
+        self.api_key_entry.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+
+        # Load existing key
+        self.api_key_entry.insert(0, get_key(".env", "OPENAI_API_KEY") or "")
+
+        save_api_button = ctk.CTkButton(api_frame, text="Save Key", command=self.save_api_key)
+        save_api_button.grid(row=0, column=2, padx=10, pady=10)
+
+        self.api_status_label = ctk.CTkLabel(api_frame, text="")
+        self.api_status_label.grid(row=1, column=1, columnspan=2, padx=10, pady=(0, 10), sticky="w")
+
+        # --- Microphone Settings ---
+        mic_frame = ctk.CTkFrame(tab)
+        mic_frame.grid(row=1, column=0, padx=20, pady=(10, 20), sticky="ew")
+        mic_frame.grid_columnconfigure(1, weight=1)
+
+        mic_label = ctk.CTkLabel(mic_frame, text="Microphone:", font=ctk.CTkFont(weight="bold"))
+        mic_label.grid(row=0, column=0, padx=10, pady=10)
+
+        try:
+            mic_names = sr.Microphone.list_microphone_names()
+            if mic_names:
+                self.mic_selection_var = ctk.StringVar(value=mic_names[self.selected_mic_index])
+                mic_menu = ctk.CTkOptionMenu(mic_frame, variable=self.mic_selection_var, values=mic_names, command=self.on_mic_select)
+                mic_menu.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+            else:
+                no_mic_label = ctk.CTkLabel(mic_frame, text="No microphones found.")
+                no_mic_label.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+                self.selected_mic_index = None
+        except Exception as e:
+            error_mic_label = ctk.CTkLabel(mic_frame, text=f"Could not load microphones: {e}")
+            error_mic_label.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+            self.selected_mic_index = None
+
+
+    def on_mic_select(self, selected_mic_name):
+        """Callback for when a microphone is selected from the dropdown."""
+        try:
+            mic_list = sr.Microphone.list_microphone_names()
+            self.selected_mic_index = mic_list.index(selected_mic_name)
+            print(f"Microphone selected: {selected_mic_name} (index: {self.selected_mic_index})")
+        except (ValueError, IndexError):
+            print("Error selecting microphone.")
+            self.selected_mic_index = None
+
+    def save_api_key(self):
+        """Saves the API key from the entry widget to the .env file."""
+        new_key = self.api_key_entry.get()
+        if new_key:
+            set_key(".env", "OPENAI_API_KEY", new_key)
+            self.api_status_label.configure(text="API Key saved. Please restart the application for changes to take effect.")
+        else:
+            self.api_status_label.configure(text="API Key cannot be empty.")
 
     def setup_rules_lawyer_tab(self):
         """Creates the widgets for the AI Rules Lawyer tab."""
