@@ -18,3 +18,8 @@ celerybeat-schedule
 
 # Environment
 .env
+
+# PyInstaller
+dist/
+build/
+*.spec

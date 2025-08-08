@@ -1,18 +1,60 @@
-﻿# The AI Dungeon Master's Command Center
+# The AI Dungeon Master's Command Center
 
-## Project Vision
-[cite_start]The AI Dungeon Master's Command Center is a comprehensive, all-in-one web application designed to augment the tabletop role-playing game (TTRPG) experience. [cite: 8] [cite_start]By leveraging a suite of specialized AI tools, this project aims to drastically reduce Dungeon Master (DM) preparation time, streamline in-game management, and increase player immersion. [cite: 9]
+The AI Dungeon Master's Command Center is a comprehensive, all-in-one desktop application designed to augment the tabletop role-playing game (TTRPG) experience.
 
-[cite_start]This allows DMs to focus on what matters most: collaborating with their players to tell a great story. [cite: 11]
+## Quick Start Guide (Running from Source)
 
-## MVP Features (Phase 1)
-* **The World Forge (Generative Content)**: A creative engine for campaign preparation. [cite_start]Input keywords, themes, or simple story beats to generate rich, detailed content like quest outlines and compelling NPC backstories. [cite: 27, 29]
-* [cite_start]**The AI Rules Lawyer (Knowledge Retrieval)**: An instant-access, natural language chatbot for rules clarification during live gameplay, based on the D&D 5e System Reference Document (SRD). [cite: 39]
+This guide explains how to run the application directly from its source code. This is the recommended method for running the app.
 
-## Setup & Installation
-1.  Clone the repository.
-2.  Create and activate the virtual environment: `python -m venv .venv`
-3.  Install dependencies: `pip install -r requirements.txt`
-4.  Run the application: `flask run`
+### 1. Prerequisites
+* You must have Python 3.9 or newer installed.
+* You need Git to clone the repository.
 
-.
+### 2. Clone the Repository
+Open your terminal or command prompt and run:
+```bash
+git clone https://github.com/your-username/DM-Command-Center-Desktop.git
+cd DM-Command-Center-Desktop
+```
+### 3. Create a Virtual Environment
+Create a dedicated virtual environment for the project. This keeps its dependencies separate from your other Python projects.
+
+```bash
+# On Windows
+python -m venv .venv
+
+# On macOS/Linux
+python3 -m venv .venv
+```
+### 4. Activate the Environment
+You must activate the environment before installing packages.
+
+```bash
+# On Windows
+.\.venv\Scripts\activate
+
+# On macOS/Linux
+source .venv/bin/activate
+```
+### 5. Install Dependencies
+Install all the required Python libraries from the requirements.txt file.
+
+```bash
+pip install -r requirements.txt
+```
+### 6. Set Up Your API Key
+The application requires an OpenAI API key.
+
+Create a file in the project's root directory named `.env`.
+
+Add your API key to this file in the following format:
+```
+OPENAI_API_KEY="sk-YourSecretKeyGoesHere"
+```
+### 7. Run the Application
+You're all set! Launch the application by running the `app.py` script.
+
+```bash
+python app.py
+```
+The application window should now appear. The first time you run it, it may take a minute to build the local rules database.
