@@ -57,6 +57,25 @@ def init_db(db_path):
         if conn:
             conn.close()
 
+def add_npc(db_path, name, description, portrait_blob=None):
+    """Adds a new NPC to the database."""
+    if not db_path:
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO npcs (name, description, portrait) VALUES (?, ?, ?)",
+            (name, description, portrait_blob)
+        )
+        conn.commit()
+        print(f"NPC '{name}' added to the database.")
+    except sqlite3.Error as e:
+        print(f"Database error adding NPC: {e}")
+    finally:
+        if conn:
+            conn.close()
+
 def get_all_npcs(db_path):
     """Retrieves all NPCs (id, name) from the database."""
     if not db_path:

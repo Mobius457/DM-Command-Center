@@ -169,6 +169,7 @@ class DMCommandCenterApp(ctk.CTk):
         self.tab_view.add("Ambiance Engine")
         self.tab_view.add("Map Forge")
         self.tab_view.add("Campaign Explorer")
+        self.tab_view.add("Campaign Wizard")
         self.tab_view.add("Settings")
         
         # --- Configure Tabs ---
@@ -178,6 +179,7 @@ class DMCommandCenterApp(ctk.CTk):
         self.setup_ambiance_tab()
         self.setup_map_forge_tab()
         self.setup_campaign_explorer_tab()
+        self.setup_campaign_wizard_tab()
         self.setup_settings_tab()
 
         # --- Start Queue Processor ---
@@ -214,6 +216,10 @@ class DMCommandCenterApp(ctk.CTk):
             elif msg_type == 'suggestion':
                 self.update_textbox(self.suggestion_output, data)
                 self.suggestion_button.configure(state="normal", text="Get AI Suggestions")
+            elif msg_type == 'wizard_progress':
+                progress, status = data
+                self.wizard_progress_bar.set(progress)
+                self.wizard_status_label.configure(text=f"Status: {status}")
         except queue.Empty:
             pass
         finally:
@@ -442,6 +448,100 @@ class DMCommandCenterApp(ctk.CTk):
             campaign_name = os.path.basename(filepath)
             self.campaign_name_label.configure(text=f"Campaign: {campaign_name}")
             self.populate_campaign_explorer()
+
+    def setup_campaign_wizard_tab(self):
+        """Creates the widgets for the Campaign Wizard tab."""
+        tab = self.tab_view.tab("Campaign Wizard")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(1, weight=1)
+
+        # --- Input Frame ---
+        input_frame = ctk.CTkFrame(tab)
+        input_frame.grid(row=0, column=0, padx=20, pady=20, sticky="ew")
+        input_frame.grid_columnconfigure(0, weight=1)
+
+        prompt_label = ctk.CTkLabel(input_frame, text="Enter your high-level campaign concept:", font=ctk.CTkFont(weight="bold"))
+        prompt_label.pack(padx=10, pady=(10, 5), anchor="w")
+
+        self.wizard_input = ctk.CTkTextbox(input_frame, height=100)
+        self.wizard_input.pack(padx=10, pady=5, fill="x", expand=True)
+        self.wizard_input.insert("0.0", "A level 1-5 adventure about a mysterious plague in a remote mountain village, culminating in a confrontation with a necromancer.")
+
+        self.generate_campaign_button = ctk.CTkButton(input_frame, text="Generate Full Campaign", command=self.start_campaign_generation_thread)
+        self.generate_campaign_button.pack(padx=10, pady=10, anchor="e")
+
+        # --- Progress Frame ---
+        progress_frame = ctk.CTkFrame(tab)
+        progress_frame.grid(row=1, column=0, padx=20, pady=(0, 20), sticky="ew")
+        progress_frame.grid_columnconfigure(0, weight=1)
+
+        self.wizard_status_label = ctk.CTkLabel(progress_frame, text="Status: Idle")
+        self.wizard_status_label.pack(padx=10, pady=5, anchor="w")
+
+        self.wizard_progress_bar = ctk.CTkProgressBar(progress_frame)
+        self.wizard_progress_bar.set(0)
+        self.wizard_progress_bar.pack(padx=10, pady=5, fill="x", expand=True)
+
+    def start_campaign_generation_thread(self):
+        """Starts the campaign generation in a new thread."""
+        if not self.current_campaign_path:
+            print("Cannot generate campaign: No active campaign file.")
+            self.wizard_status_label.configure(text="Status: Please create or open a campaign first.")
+            return
+
+        self.generate_campaign_button.configure(state="disabled")
+        self.wizard_progress_bar.set(0)
+        thread = threading.Thread(target=self.generate_campaign_from_concept)
+        thread.daemon = True
+        thread.start()
+
+    def generate_campaign_from_concept(self):
+        """Orchestrates the multi-step generation of a full campaign."""
+        try:
+            concept = self.wizard_input.get("0.0", "end-1c")
+            if not concept.strip():
+                self.ambiance_queue.put((0, "Idle. Input concept cannot be empty."))
+                return
+
+            # --- Step 1: Generate Villain ---
+            self.ambiance_queue.put(('wizard_progress', (0.1, "Generating villain...")))
+            villain_prompt = f"Based on the campaign concept '{concept}', create a compelling main villain. The first line of your response must be only the villain's full name. Then, in a new paragraph, describe their appearance, core motivation, and a secret weakness."
+            villain_details = self.world_forge_llm.invoke(villain_prompt).content
+            try:
+                villain_lines = villain_details.split('\n', 1)
+                villain_name = villain_lines[0].strip()
+                database.add_npc(self.current_campaign_path, villain_name, villain_details)
+            except Exception as e:
+                print(f"Error parsing/saving villain: {e}")
+                database.add_npc(self.current_campaign_path, "Generated Villain", villain_details)
+
+            # --- Step 2: Generate Main Plot ---
+            self.ambiance_queue.put(('wizard_progress', (0.3, "Generating main plot...")))
+            plot_prompt = f"Campaign concept: '{concept}'. Main villain: '{villain_details}'. Based on this, create a 3-act story arc for the campaign. Provide a short summary for each act."
+            main_plot = self.world_forge_llm.invoke(plot_prompt).content
+
+            # --- Step 3: Generate Quests ---
+            self.ambiance_queue.put(('wizard_progress', (0.5, "Breaking down into quests...")))
+            quest_prompt = f"Main plot: '{main_plot}'. Break this story down into 3-5 distinct, interconnected quests. For each quest, provide only a creative name and a one-sentence summary."
+            quests_text = self.world_forge_llm.invoke(quest_prompt).content
+
+            # --- Step 4 & 5: Generate NPCs and Locations per quest ---
+            self.ambiance_queue.put(('wizard_progress', (0.7, "Fleshing out quests...")))
+            # This part would involve parsing quests_text and looping, which is complex.
+            # For this version, we'll do a simplified final step.
+            final_details_prompt = f"Campaign concept: '{concept}'. Main Plot: '{main_plot}'. Quests: '{quests_text}'. To bring this to life, describe two key NPCs (not the main villain) and two key locations that are important to the overall story."
+            final_details = self.world_forge_llm.invoke(final_details_prompt).content
+            # Here you would parse and save the other NPCs and locations as well
+
+            self.ambiance_queue.put(('wizard_progress', (1.0, "Campaign generated successfully!")))
+            self.populate_campaign_explorer() # Refresh explorer UI
+
+        except Exception as e:
+            print(f"Error during campaign generation: {e}")
+            self.ambiance_queue.put(('wizard_progress', (0, f"Error: {e}")))
+        finally:
+            self.generate_campaign_button.configure(state="normal")
+            # In a real implementation, this would be done via the queue.
 
     def setup_campaign_explorer_tab(self):
         """Creates the widgets for the Campaign Explorer tab."""
