@@ -1,4 +1,4 @@
-# --- Python & Virtual Environment ---
+# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -7,27 +7,19 @@ __pycache__/
 env/
 venv/
 .venv/
-
-# --- Secrets ---
-# Never commit your API keys!
-.env
-
-# --- IDE / Editor ---
+pip-log.txt
+pip-delete-this-directory.txt
+celerybeat-schedule
+*.so
+/.cache/
+# VS Code
 .vscode/
 .history/
 
-# --- PyInstaller Artifacts ---
-# Ignore all build output from PyInstaller
-build/
+# Environment
+.env
+
+# PyInstaller
 dist/
+build/
 *.spec
-
-# --- Generated Data & Temporary Files ---
-# The database can be rebuilt from the source PDF
-db_chroma/
-
-# The temporary audio file from the Ambiance Engine
-temp_audio.wav
-
-# If you have any log files
-*.log
