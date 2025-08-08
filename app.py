@@ -153,7 +153,6 @@ class DMCommandCenterApp(ctk.CTk):
 
         # --- Campaign State ---
         self.current_campaign_path = None
-        self.campaign_name_label = None
 
         # --- Window Configuration ---
         self.title("AI Dungeon Master's Command Center")
