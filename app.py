@@ -1,5 +1,6 @@
 import os
 import csv
+import sqlite3
 import customtkinter as ctk
 from customtkinter import CTkInputDialog
 import threading
@@ -570,6 +571,7 @@ class DMCommandCenterApp(ctk.CTk):
 
     def load_npc(self, npc_id):
         """Loads a specific NPC's data from the database into the World Forge."""
+        conn = None
         try:
             conn = sqlite3.connect(self.current_campaign_path)
             cursor = conn.cursor()
@@ -709,6 +711,7 @@ class DMCommandCenterApp(ctk.CTk):
             print("Save cancelled: NPC name cannot be empty.")
             return
 
+        conn = None
         try:
             conn = sqlite3.connect(self.current_campaign_path)
             cursor = conn.cursor()
