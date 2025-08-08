@@ -554,20 +554,34 @@ class DMCommandCenterApp(ctk.CTk):
         self.campaign_explorer_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
     def populate_campaign_explorer(self):
-        """Clears and repopulates the campaign explorer with items from the DB."""
-        # Clear existing widgets
-        for widget in self.campaign_explorer_frame.winfo_children():
-            widget.destroy()
+        """
+        Safely clears and schedules the repopulation of the campaign explorer.
+        This is a two-step process to avoid race conditions with the GUI event loop.
+        """
+        # Destroy the old frame if it exists
+        if hasattr(self, 'campaign_explorer_frame'):
+            self.campaign_explorer_frame.destroy()
+
+        # Schedule the creation of the new frame and its content to run after
+        # the event loop has had time to process the destruction.
+        self.after(50, self.rebuild_explorer_frame)
+
+    def rebuild_explorer_frame(self):
+        """Creates the campaign explorer frame and populates it with items."""
+        tab = self.tab_view.tab("Campaign Explorer")
+        self.campaign_explorer_frame = ctk.CTkScrollableFrame(tab, label_text="Saved NPCs")
+        self.campaign_explorer_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
         # Populate with NPCs
         npcs = database.get_all_npcs(self.current_campaign_path)
-        for npc_id, npc_name in npcs:
-            npc_button = ctk.CTkButton(
-                self.campaign_explorer_frame,
-                text=npc_name,
-                command=lambda npc_id=npc_id: self.load_npc(npc_id)
-            )
-            npc_button.pack(fill="x", padx=5, pady=2)
+        if npcs:
+            for npc_id, npc_name in npcs:
+                npc_button = ctk.CTkButton(
+                    self.campaign_explorer_frame,
+                    text=npc_name,
+                    command=lambda npc_id=npc_id: self.load_npc(npc_id)
+                )
+                npc_button.pack(fill="x", padx=5, pady=2)
 
     def load_npc(self, npc_id):
         """Loads a specific NPC's data from the database into the World Forge."""
