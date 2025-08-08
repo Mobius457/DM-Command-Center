@@ -1,7 +1,7 @@
 import os
 import csv
-from customtkinter.windows.widgets.ctk_input_dialog import CTkInputDialog
 import customtkinter as ctk
+from customtkinter import CTkInputDialog
 import threading
 import queue
 import speech_recognition as sr
